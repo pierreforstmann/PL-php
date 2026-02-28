@@ -1,6 +1,14 @@
 /*
  * $Id$
  */
+
+// php 8 - begin
+#define TSRMLS_DC  
+#define TSRMLS_CC  
+#define TSRMLS_D   
+#define TSRMLS_C  
+// php 8 -i end
+
 #ifndef PLPHP_SPI_H
 #define PLPHP_SPI_H
 
@@ -23,6 +31,7 @@
 extern int SPIres_rtype;
 /* Function table */
 extern zend_function_entry spi_functions[];
+extern const zend_function_entry plphp_functions[];
 
 /* SRF support: */
 extern FunctionCallInfo current_fcinfo;
@@ -51,7 +60,7 @@ ZEND_FUNCTION(spi_rewind);
 ZEND_FUNCTION(pg_raise);
 ZEND_FUNCTION(return_next);
 
-void php_SPIresult_destroy(zend_rsrc_list_entry *rsrc TSRMLS_DC);
+void php_SPIresult_destroy(zend_resource *rsrc TSRMLS_DC);
 
 #endif /* PLPHP_SPI_H */
 

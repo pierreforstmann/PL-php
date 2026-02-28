@@ -1,0 +1,6 @@
+# plphp postgresql extension
+comment = 'PL/php'
+default_version = '1.0.0'
+module_pathname = '$libdir/plphp'
+relocatable = false
+

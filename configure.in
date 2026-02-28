@@ -99,9 +99,9 @@ Please rebuild your PHP library with --enable-embed])
 fi
 
 # Checks for libraries.
-AC_CHECK_LIB([php5], [php_module_startup],[], [have_php5="no"], [$PHP_LDFLAGS])
-if test "$have_php5" = "no"; then
-	AC_MSG_ERROR([Cannot find PHP 5 SAPI library])
+AC_CHECK_LIB([php], [php_module_startup],[], [have_php="no"], [$PHP_LDFLAGS])
+if test "$have_php" = "no"; then
+	AC_MSG_ERROR([Cannot find PHP SAPI library])
 fi
 
 

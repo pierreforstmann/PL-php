@@ -1,0 +1,142 @@
+1. What you’re really up against
+
+You’re trying to bridge two big version gaps at once:
+
+    PHP 5 → PHP 8
+
+    PostgreSQL 8/9 → PostgreSQL 18
+
+PL/PHP was written for the world where:
+
+    PHP used TSRMLS macros, old zval layout, old hash APIs.
+
+    PostgreSQL had older SPI, FunctionCallInfo, and fmgr APIs.
+
+So you’re not fixing a few compile errors—you’re doing a full engine/API port.
+2. Concrete areas you’ll need to touch
+
+Here’s a realistic checklist.
+A. Build system
+
+    configure.in / Makefile.in
+
+        Switch from libphp5/libphp8 to libphp (you already started).
+
+        Ensure php-config is used for CFLAGS, LDFLAGS, INCLUDES.
+
+        Make sure it links against PHP built with --enable-embed.
+
+B. PHP API changes
+
+You’ll need to systematically update:
+
+    TSRMLS macros
+
+        Remove TSRMLS_DC, TSRMLS_CC, TSRMLS_D, TSRMLS_C from:
+
+            function declarations
+
+            definitions
+
+            calls
+
+    zval handling  
+    PHP 7+ changed zval from a pointer-heavy structure to a value type with different macros.
+
+    You’ll need to rewrite:
+
+        ZVAL_* usage
+
+        Z_STRVAL_P, Z_STRLEN_P, Z_LVAL_P, etc.
+
+        any direct field access like zv->value.*
+
+    Hash tables / arrays  
+    Old zend_hash_* APIs changed signatures and behavior.
+    Any code iterating over PHP arrays will likely break and must be rewritten using the PHP 8 APIs.
+
+    Module globals / INI / startup
+
+        php_module_startup, php_request_startup, php_request_shutdown usage may need updates.
+
+        Any ZEND_DECLARE_MODULE_GLOBALS or TSRMG usage must be revisited.
+
+C. PostgreSQL API changes
+
+PL/PHP integrates as a procedural language, so it touches:
+
+    PG_MODULE_MAGIC
+
+    PG_FUNCTION_INFO_V1
+
+    FunctionCallInfo, Datum, PG_RETURN_* macros
+
+    SPI calls (SPI_connect, SPI_exec, etc.)
+
+You’ll need to:
+
+    Compare PL/PHP’s usage with a modern PL (e.g. src/pl/plperl or plpython3) in PostgreSQL 18.
+
+    Update function signatures and macros to match current headers.
+
+3. How to approach the port without going insane
+
+If you want this to be doable, treat it as a series of focused passes, not “fix errors as they appear”.
+Pass 1: Make it compile against PHP 8 only
+
+    Ignore PostgreSQL for a moment.
+
+    Create a tiny test program that embeds PHP using the same pattern PL/PHP uses.
+
+    Make sure:
+
+        php_module_startup, php_request_startup, php_request_shutdown work.
+
+        You can create a zval, set a string/int, and call a PHP function.
+
+Once you understand the correct modern embedding pattern, mirror that into PL/PHP.
+Pass 2: Normalize TSRMLS and zval usage
+
+    Search for TSRMLS_ in the whole tree and remove/adjust.
+
+    Replace old zval macros with PHP 8 equivalents.
+
+    Make sure no code accesses zval internals directly.
+
+Pass 3: Align with a modern PL in PostgreSQL
+
+    Open PostgreSQL 18 sources and study src/pl/plperl or src/pl/plpython3.
+
+    Compare:
+
+        how they define the call handler
+
+        how they map SQL types ↔ language types
+
+        how they manage memory and SPI
+
+Use that as a template to modernize PL/PHP’s PostgreSQL side.
+4. A very practical next step
+
+Right now you’re blocked on TSRMLS. I’d suggest:
+
+    Patch all TSRMLS macros out (as described earlier).
+
+    Try to build again.
+
+    Collect the next 10–20 errors into a file.
+
+    From those, you’ll see patterns:
+
+        all zval-related
+
+        all hash-related
+
+        all PG function signatures
+
+If you paste that next batch of errors, we can start grouping them into “themes” and design patches per theme instead of whack‑a‑mole.
+5. Honest note
+
+What you’re doing is closer to reviving a dead language extension than “getting it to compile”. It’s a serious, interesting project. If you keep going, you’ll end up understanding both the Zend Engine and PostgreSQL internals much better than most people.
+
+If you’re up for that, I’m in—bring me the next error wave and we’ll start carving a path through it.
