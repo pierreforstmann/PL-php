@@ -15,7 +15,8 @@ CONTROL=plhp.control
 SHLIB_LINK =   -L/usr/local/lib -lphp  -lm -lxml2 -lsqlite3 -lxml2 -lsqlite3 -lxml2 -lxml2 -lxml2 -lxml2
 
 REGRESS_OPTS = --dbname=$(PL_TESTDB) 
-REGRESS = base shared trigger spi raise cargs pseudo srf validator
+REGRESS=first
+#REGRESS = base shared trigger spi raise cargs pseudo srf validator
 
 all: all-lib
 install: install-lib

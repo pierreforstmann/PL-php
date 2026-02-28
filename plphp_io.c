@@ -366,7 +366,7 @@ plphp_convert_from_pg_array(char *input TSRMLS_DC)
 zval *
 plphp_array_get_elem(zval *array, char *key)
 {
-	zval	  **element;
+	zval	  *element;
 	// PHP 8
 	zend_string *zkey = zend_string_init(key, strlen(key), 0);
 
@@ -385,7 +385,7 @@ plphp_array_get_elem(zval *array, char *key)
     //					       (void **) &element) != SUCCESS) 
 	zend_string_release(zkey);
 
-	return element[0];
+	return element;
 }
 
 /*
