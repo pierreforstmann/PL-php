@@ -491,7 +491,9 @@ plphp_init(void)
 			/* Init procedure cache */
 			array_init(&plphp_proc_array);
 
-			zend_register_functions(NULL, spi_functions, NULL, MODULE_PERSISTENT TSRMLS_CC);
+			// PHP 8 
+			// zend_register_functions(NULL, spi_functions, NULL, MODULE_PERSISTENT TSRMLS_CC);
+			zend_register_functions(NULL, plphp_functions, NULL, MODULE_PERSISTENT TSRMLS_CC);
 
 			PG(during_request_startup) = true;
 
@@ -1318,8 +1320,9 @@ plphp_compile_function(Oid fnoid, bool is_trigger TSRMLS_DC)
 			 * FIXME -- use a per-function memory context and fix this
 			 * stuff for good
 			 */
-			free(prodesc->proname);
-			free(prodesc);
+			// PHP8: use efree
+			efree(prodesc->proname);
+			efree(prodesc);
 			prodesc = NULL;
 		}
 	}
@@ -1347,7 +1350,8 @@ plphp_compile_function(Oid fnoid, bool is_trigger TSRMLS_DC)
 		/*
 		 * Allocate a new procedure description block
 		 */
-		prodesc = (plphp_proc_desc *) malloc(sizeof(plphp_proc_desc));
+		// PHP 8: use emalloc
+		prodesc = (plphp_proc_desc *) emalloc(sizeof(plphp_proc_desc));
 		if (!prodesc)
 			ereport(ERROR,
 					(errcode(ERRCODE_OUT_OF_MEMORY),
@@ -1357,7 +1361,8 @@ plphp_compile_function(Oid fnoid, bool is_trigger TSRMLS_DC)
 		prodesc->proname = strdup(internal_proname);
 		if (!prodesc->proname)
 		{
-			free(prodesc);
+			// PHP 8: use efree
+			efree(prodesc);
 			ereport(ERROR,
 					(errcode(ERRCODE_OUT_OF_MEMORY),
 					 errmsg("out of memory")));
@@ -1384,8 +1389,9 @@ plphp_compile_function(Oid fnoid, bool is_trigger TSRMLS_DC)
 								 0, 0, 0);
 		if (!HeapTupleIsValid(langTup))
 		{
-			free(prodesc->proname);
-			free(prodesc);
+			/* PHP 8: use efree */
+			efree(prodesc->proname);
+			efree(prodesc);
 			elog(ERROR, "cache lookup failed for language %u",
 					   procStruct->prolang);
 		}
@@ -1431,8 +1437,9 @@ plphp_compile_function(Oid fnoid, bool is_trigger TSRMLS_DC)
 				}
 				else if (procStruct->prorettype == TRIGGEROID)
 				{
-					free(prodesc->proname);
-					free(prodesc);
+					// PHP 8: use efree
+					efree(prodesc->proname);
+					efree(prodesc);
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("trigger functions may only be called "
@@ -1440,8 +1447,9 @@ plphp_compile_function(Oid fnoid, bool is_trigger TSRMLS_DC)
 				}
 				else
 				{
-					free(prodesc->proname);
-					free(prodesc);
+					// PHP 8: use efree
+					efree(prodesc->proname);
+				 	efree(prodesc);
 					ereport(ERROR,
 							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 							 errmsg("plphp functions cannot return type %s",

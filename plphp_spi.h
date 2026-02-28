@@ -30,7 +30,7 @@
 /* resource type Id for SPIresult */
 extern int SPIres_rtype;
 /* Function table */
-extern zend_function_entry spi_functions[];
+//extern zend_function_entry spi_functions[];
 extern const zend_function_entry plphp_functions[];
 
 /* SRF support: */

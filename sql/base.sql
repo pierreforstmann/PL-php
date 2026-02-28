@@ -1,6 +1,7 @@
 --
 -- Base functionality.
 --
+create extension plphp;
 
 -- Basic things: scalars and arrays.
 CREATE FUNCTION test_void() RETURNS integer

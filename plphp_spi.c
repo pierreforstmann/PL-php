@@ -55,28 +55,69 @@
 int SPIres_rtype;
 
 /* SPI function table */
-zend_function_entry spi_functions[] =
-{
-	ZEND_FE(spi_exec, NULL)
-	ZEND_FE(spi_fetch_row, NULL)
-	ZEND_FE(spi_processed, NULL)
-	ZEND_FE(spi_status, NULL)
-	ZEND_FE(spi_rewind, NULL)
-	ZEND_FE(pg_raise, NULL)
-	ZEND_FE(return_next, NULL)
-	{NULL, NULL, NULL}
-};
+//zend_function_entry spi_functions[] =
+//{
+//	ZEND_FE(spi_exec, NULL)
+//	ZEND_FE(spi_fetch_row, NULL)
+//	ZEND_FE(spi_processed, NULL)
+//	ZEND_FE(spi_status, NULL)
+//	ZEND_FE(spi_rewind, NULL)
+//	ZEND_FE(pg_raise, NULL)
+//	ZEND_FE(return_next, NULL)
+//	{NULL, NULL, NULL}
+//};
 
 // begin - php8
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_spi_exec, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, query, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_spi_fetch_row, 0, 0, 1)
+ZEND_ARG_TYPE_INFO(0, result, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_spi_processed, 0, 0, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_spi_status, 0, 0, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_spi_rewind, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, cursor, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_pg_raise, 0, 0, 1)
+    ZEND_ARG_TYPE_INFO(0, message, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_return_next, 0, 0, 1)
+    ZEND_ARG_INFO(0, value)
+ZEND_END_ARG_INFO()
+
+
+
 // Define your functions
+
+//const zend_function_entry plphp_functions[] = {
+//    PHP_FE(spi_exec, arginfo_spi_exec)
+//    PHP_FE(spi_fetch_row, arginfo_spi_fetch_row)
+//    PHP_FE(spi_processed, arginfo_spi_processed)
+//    PHP_FE(spi_status, arginfo_spi_status)
+//    PHP_FE(spi_rewind, arginfo_spi_rewind)
+//    PHP_FE(pg_raise, arginfo_pg_raise)
+//    PHP_FE(return_next, arginfo_return_next)
+//    PHP_FE_END
+//};
+
 const zend_function_entry plphp_functions[] = {
-	ZEND_FE(spi_exec, NULL)
-	ZEND_FE(spi_fetch_row, NULL)
-	ZEND_FE(spi_processed, NULL)
-	ZEND_FE(spi_status, NULL)
-	ZEND_FE(spi_rewind, NULL)
-	ZEND_FE(pg_raise, NULL)
-	ZEND_FE(return_next, NULL)
+	ZEND_FE(spi_exec, arginfo_spi_exec)
+	ZEND_FE(spi_fetch_row, arginfo_spi_fetch_row)
+	ZEND_FE(spi_processed, arginfo_spi_processed)
+	ZEND_FE(spi_status, arginfo_spi_status)
+	ZEND_FE(spi_rewind, arginfo_spi_rewind)
+	ZEND_FE(pg_raise, arginfo_pg_raise)
+	ZEND_FE(return_next, arginfo_return_next)
 	{NULL, NULL, NULL}
 };
 
@@ -204,7 +245,8 @@ ZEND_FUNCTION(spi_exec)
 	PG_END_TRY();
 
 	/* This malloc'ed chunk is freed in php_SPIresult_destroy */
-	SPIres = (php_SPIresult *) malloc(sizeof(php_SPIresult));
+	// PHP 8 : use emalloc instead of malloc
+	SPIres = (php_SPIresult *) emalloc(sizeof(php_SPIresult));
 	if (!SPIres)
 		ereport(ERROR,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
@@ -563,7 +605,8 @@ void
 	if (res->SPI_tuptable != NULL)
 		SPI_freetuptable(res->SPI_tuptable);
 
-	free(res);
+	// PHP 8: use efree
+	efree(res);
 }
 
 /* Return an array of TABLE argument values for return_next */

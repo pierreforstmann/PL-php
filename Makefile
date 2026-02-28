@@ -3,6 +3,8 @@
 
 MODULE_big = plphp
 OBJS = plphp.o plphp_io.o plphp_spi.o
+CFLAGS=-fsanitize=address -fno-omit-frame-pointer
+LDFLAGS=-fsanitize=address -fno-omit-frame-pointer
 PG_CPPFLAGS =  -I/usr/local/include/php -I/usr/local/include/php/main -I/usr/local/include/php/TSRM -I/usr/local/include/php/Zend -I/usr/local/include/php/ext -I/usr/local/include/php/ext/date/lib
 
 # You should not have to modify anything below this line
