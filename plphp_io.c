@@ -290,7 +290,7 @@ plphp_convert_to_pg_array(zval *array)
 					appendStringInfo(&str, "%li", Z_LVAL_P(element));
 					break;
 				case IS_DOUBLE:
-					appendStringInfo(&str, "%f", Z_LVAL_P(element));
+					appendStringInfo(&str, "%lu", Z_LVAL_P(element));
 					break;
 				case IS_STRING:
 					appendStringInfo(&str, "\"%s\"", Z_STRVAL_P(element));
@@ -610,7 +610,7 @@ plphp_modify_tuple(zval *outdata, TriggerData *tdata)
 	 */
 	for (i = 0; i < tupdesc->natts; i++)
 	{
-		zval  *element;
+		zval  *lelement = NULL;
 		// PG
 		// char   *attname = NameStr(tupdesc->attrs[i]->attname);
 		char   *attname = NameStr(TupleDescAttr(tupdesc, i)->attname);
@@ -628,7 +628,7 @@ plphp_modify_tuple(zval *outdata, TriggerData *tdata)
 		//	elog(ERROR, "$_TD['new'] does not contain attribute \"%s\"",
 		//		 attname);
 
-		vals[i] = plphp_zval_get_cstring(element, true, true);
+		vals[i] = plphp_zval_get_cstring(lelement, true, true);
 	}
 
 	/* Return to the original context so that the new tuple will survive */

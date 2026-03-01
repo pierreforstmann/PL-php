@@ -157,7 +157,7 @@ ZEND_FUNCTION(spi_exec)
 	long		status;
 	long		limit;
 	php_SPIresult *SPIres;
-	int			spi_id;
+	int			spi_id = 0;
 	MemoryContext oldcontext = CurrentMemoryContext;
 	ResourceOwner oldowner = CurrentResourceOwner;
 
