@@ -36,11 +36,11 @@ plphp_zval_from_tuple(HeapTuple tuple, TupleDesc tupdesc)
 {
 	int			i;
 	char	   *attname = NULL;
-	zval		array_val;
-	zval	   *array = &array_val;
+	zval	   *array = emalloc(sizeof(zval)); 
 
 	// PHP 8
 	// MAKE_STD_ZVAL(array);
+	ZVAL_UNDEF(array);
 	array_init(array);
 
 	for (i = 0; i < tupdesc->natts; i++)
@@ -121,6 +121,7 @@ plphp_htup_from_zval(zval *val, TupleDesc tupdesc)
 	 * try to get 1st N array elements and assign them to the tuple
 	 */
 	if (allempty)
+		zend_hash_internal_pointer_reset_ex(Z_ARRVAL_P(val), &pos);
 		for (;
      		((element = zend_hash_get_current_data_ex(Z_ARRVAL_P(val), &pos)) != NULL) &&
 		     (i < tupdesc->natts);
@@ -202,7 +203,7 @@ plphp_srf_htup_from_zval(zval *val, AttInMetadata *attinmeta,
 				//							  (void **) &element,
 				//							  &pos);
 				element = zend_hash_get_current_data_ex(Z_ARRVAL_P(val), &pos);
-				values[0] = plphp_zval_get_cstring(&element[0], true, true);
+				values[0] = plphp_zval_get_cstring(element, true, true);
 			}
 			else
 				values[0] = plphp_zval_get_cstring(val, true, true);
@@ -225,7 +226,7 @@ plphp_srf_htup_from_zval(zval *val, AttInMetadata *attinmeta,
 					break;
 				}
 
-				values[i++] = plphp_zval_get_cstring(&element[0], true, true);
+				values[i++] = plphp_zval_get_cstring(element, true, true);
 			}
 		}
 	}
@@ -290,7 +291,7 @@ plphp_convert_to_pg_array(zval *array)
 					appendStringInfo(&str, "%li", Z_LVAL_P(element));
 					break;
 				case IS_DOUBLE:
-					appendStringInfo(&str, "%lu", Z_LVAL_P(element));
+					appendStringInfo(&str, "%f", Z_DVAL_P(element));
 					break;
 				case IS_STRING:
 					appendStringInfo(&str, "\"%s\"", Z_STRVAL_P(element));
@@ -328,8 +329,7 @@ plphp_convert_to_pg_array(zval *array)
 zval *
 plphp_convert_from_pg_array(char *input TSRMLS_DC)
 {
-	zval		retval_val;
-	zval	   *retval = &retval_val;
+	zval	   *retval = emalloc(sizeof(zval));
 	int			i;
 	StringInfoData str;
 	
@@ -337,6 +337,7 @@ plphp_convert_from_pg_array(char *input TSRMLS_DC)
 
 	// PHP 8
 	// MAKE_STD_ZVAL(retval);
+	ZVAL_UNDEF(retval);
 	array_init(retval);
 
 	for (i = 0; i < strlen(input); i++)
@@ -375,16 +376,13 @@ plphp_array_get_elem(zval *array, char *key)
 	if (Z_TYPE_P(array) != IS_ARRAY)
 		elog(ERROR, "passed zval is not an array");
 
-	if (zend_symtable_find(Z_ARRVAL_P(array),zkey)) {
-		zend_string_release(zkey);
-		return NULL;
-	}
+	element = zend_symtable_find(Z_ARRVAL_P(array),zkey);
 	// if (zend_symtable_find(array->value.ht,
     //					   	   key,
     //					       strlen(key) + 1,
     //					       (void **) &element) != SUCCESS) 
-	zend_string_release(zkey);
 
+	zend_string_release(zkey);
 	return element;
 }
 
@@ -406,6 +404,8 @@ plphp_zval_get_cstring(zval *val, bool do_array, bool null_ok)
 {
 	char *ret;
 
+	//elog(WARNING, "DEBUG get_cstring entry: val=%p type=%d", (void*)val, val ? Z_TYPE_P(val) : -1);
+
 	if (!val)
 	{
 		if (null_ok)
@@ -414,6 +414,8 @@ plphp_zval_get_cstring(zval *val, bool do_array, bool null_ok)
 			elog(ERROR, "invalid zval pointer");
 	}
 
+	//elog(WARNING, "DEBUG get_cstring entry: val=%p type=%d", (void*)val, val ? Z_TYPE_P(val) : -1);
+
 	switch (Z_TYPE_P(val))
 	{
 		case IS_NULL:
@@ -421,6 +423,7 @@ plphp_zval_get_cstring(zval *val, bool do_array, bool null_ok)
 		case IS_LONG:
 			ret = palloc(64);
 			snprintf(ret, 64, "%ld", Z_LVAL_P(val));
+			//elog(WARNING, "DEBUG IS_LONG: lval=%ld ret='%s'", Z_LVAL_P(val), ret);
 			break;
 		case IS_DOUBLE:
 			ret = palloc(64);
@@ -437,8 +440,8 @@ plphp_zval_get_cstring(zval *val, bool do_array, bool null_ok)
 			break;
 		case IS_STRING:
 			ret = palloc(Z_STRLEN_P(val) + 1);
-			snprintf(ret, Z_STRLEN_P(val) + 1, "%s", 
-					 Z_STRVAL_P(val));
+			snprintf(ret, Z_STRLEN_P(val) + 1, "%s", Z_STRVAL_P(val));
+			//elog(WARNING, "DEBUG IS_STRING: len=%zu str='%s'", Z_STRLEN_P(val), ret);
 			break;
 		case IS_ARRAY:
 			if (!do_array)
@@ -465,8 +468,8 @@ zval *
 plphp_build_tuple_argument(HeapTuple tuple, TupleDesc tupdesc)
 {
 	int			i;
-	zval		output_val;
-	zval	   *output = &output_val;
+	// heap: retured to caller 
+	zval		*output = emalloc(sizeof(zval));
 	Datum		attr;
 	bool		isnull;
 	char	   *attname;
@@ -477,6 +480,7 @@ plphp_build_tuple_argument(HeapTuple tuple, TupleDesc tupdesc)
 
 	// PHP 8
 	// MAKE_STD_ZVAL(output);
+	ZVAL_UNDEF(output);
 	array_init(output);
 
 	for (i = 0; i < tupdesc->natts; i++)
@@ -618,9 +622,9 @@ plphp_modify_tuple(zval *outdata, TriggerData *tdata)
 		/* Fetch the attribute value from the zval */
 		// PHP 8
 		zkey = zend_string_init(attname, strlen(attname), 0);
-		element = zend_symtable_find(Z_ARRVAL_P(newtup), zkey);
+		lelement = zend_symtable_find(Z_ARRVAL_P(newtup), zkey);
         zend_string_release(zkey);
-        if (element == NULL)
+        if (lelement == NULL)
             elog(ERROR, "$_TD['new'] does not contain attribute \"%s\"",
                  attname);
 		// if (zend_symtable_find(newtup->value.ht, attname, strlen(attname) + 1,

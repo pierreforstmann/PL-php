@@ -24,6 +24,13 @@
 
 /* PHP stuff */
 #include "php.h"
+// PHP 8 
+#include "php_variables.h"
+#include "php_globals.h"
+#include "zend_hash.h"
+#include "zend_modules.h"
+#include "php_ini.h"
+#include "php_main.h"
 
 zval *plphp_zval_from_tuple(HeapTuple tuple, TupleDesc tupdesc);
 HeapTuple plphp_htup_from_zval(zval *val, TupleDesc tupdesc);

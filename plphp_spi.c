@@ -153,7 +153,9 @@ static zval *get_table_arguments(AttInMetadata *attinmeta);
 ZEND_FUNCTION(spi_exec)
 {
 	char	   *query;
-	int			query_len;
+	// PHP 8: query_len must be size_t and not int
+	size_t		query_len;
+	char		*query_copy;
 	long		status;
 	long		limit;
 	php_SPIresult *SPIres;
@@ -195,13 +197,18 @@ ZEND_FUNCTION(spi_exec)
 		RETURN_FALSE;
 	}
 
+    
+    /* Copy into palloc'd memory before any PHP activity can free the zend_string */
+    query_copy = palloc(query_len + 1);     /* ADD THIS */
+    memcpy(query_copy, query, query_len + 1);  /* ADD THIS */
+
 	BeginInternalSubTransaction(NULL);
 	MemoryContextSwitchTo(oldcontext);
 
 	/* Call SPI */
 	PG_TRY();
 	{
-		status = SPI_exec(query, limit);
+		status = SPI_exec(query_copy, limit);  /* Use query_copy */
 
 		ReleaseCurrentSubTransaction();
 		MemoryContextSwitchTo(oldcontext);
@@ -495,10 +502,11 @@ ZEND_FUNCTION(spi_rewind)
 ZEND_FUNCTION(pg_raise)
 {
 	char       *level = NULL,
-			   *message = NULL;
+			   *message = NULL,
+			   *message_copy;
 	int         level_len,
-				message_len,
 				elevel = 0;
+	size_t		message_len;
 
 	if (ZEND_NUM_ARGS() != 2)
 	{
@@ -515,6 +523,11 @@ ZEND_FUNCTION(pg_raise)
 				   get_active_function_name(TSRMLS_C));
 	}
 
+     /* Copy into palloc'd memory before any PHP activity can free the zend_string */
+    message_copy = palloc(message_len + 1);     /* ADD THIS */
+    memcpy(message_copy, message, message_len + 1);  /* ADD THIS */
+
+
 	if (strcasecmp(level, "ERROR") == 0)
 		elevel = E_ERROR;
 	else if (strcasecmp(level, "WARNING") == 0)
@@ -524,7 +537,7 @@ ZEND_FUNCTION(pg_raise)
 	else
 		zend_error(E_ERROR, "incorrect log level");
 
-	zend_error(elevel, "%s", message);
+	zend_error(elevel, "%s", message_copy);
 }
 
 /*
@@ -602,8 +615,24 @@ void
 {
 	php_SPIresult *res = (php_SPIresult *) rsrc->ptr;
 
-	if (res->SPI_tuptable != NULL)
-		SPI_freetuptable(res->SPI_tuptable);
+	 if (res->SPI_tuptable != NULL)
+    {
+        /*
+         * Only free the tuptable if we have an active SPI connection.
+         * The destructor may be called after SPI_finish(), e.g. during
+         * PHP exception unwinding.
+         */
+        if (SPI_connect() == SPI_OK_CONNECT)
+        {
+            SPI_freetuptable(res->SPI_tuptable);
+            SPI_finish();
+        }
+        /*
+         * If we can't reconnect, just leak the tuptable memory.
+         * It will be reclaimed when the memory context is destroyed.
+         */
+        res->SPI_tuptable = NULL;
+    }
 
 	// PHP 8: use efree
 	efree(res);
@@ -613,14 +642,14 @@ void
 static
 zval *get_table_arguments(AttInMetadata *attinmeta)
 {
-	zval   retval_val;
-	zval   *retval = &retval_val;
+	zval   *retval = emalloc(sizeof(zval));
 	int		i;
 	// PHP 8
 	zval *element;
 	zend_string *zkey;
 	
 	// MAKE_STD_ZVAL(retval);
+	ZVAL_UNDEF(retval);
 	array_init(retval);
 
 	Assert(attinmeta->tupdesc);

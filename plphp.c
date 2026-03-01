@@ -823,10 +823,9 @@ plphp_trig_build_args(FunctionCallInfo fcinfo)
 	TriggerData	   *tdata;
 	TupleDesc		tupdesc;
 	int				i;
-	zval            retval_val;
-	zval            *retval;
+	zval            *retval = emalloc(sizeof(zval));
 
-    retval = &retval_val;	
+	ZVAL_UNDEF(retval);
 	array_init(retval);
 
 	tdata = (TriggerData *) fcinfo->context;
@@ -1029,135 +1028,184 @@ plphp_trigger_handler(FunctionCallInfo fcinfo, plphp_proc_desc *desc TSRMLS_DC)
 	return retval;
 }
 
-/*
- * plphp_func_handler
- * 		Handler for regular function calls
- */
 static Datum
 plphp_func_handler(FunctionCallInfo fcinfo, plphp_proc_desc *desc TSRMLS_DC)
 {
-	zval	   *phpret = NULL;
-	Datum		retval;
-	char	   *retvalbuffer = NULL;
+    zval   *phpret = NULL;
+    Datum   retval;
+    char   *retvalbuffer = NULL;
 
-	/* SRFs are handled separately */
-	Assert(!desc->retset);
+	zval	*val;
+	int		ret;
 
-	/* Call the PHP function.  */
-	phpret = plphp_call_php_func(desc, fcinfo TSRMLS_CC);
-	if (!phpret)
-		elog(ERROR, "error during execution of function %s", desc->proname);
+    Assert(!desc->retset);
 
-	REPORT_PHP_MEMUSAGE("function invoked");
+	elog(WARNING, "DEBUG prodesc=%p fn_oid=%u typioparam=%u fn_extra=%p",
+     (void*)desc,
+     desc->result_in_func.fn_oid,
+     desc->result_typioparam,
+     desc->result_in_func.fn_extra);
 
-	/* Basic datatype checks */
-	// PHP 8
-	if ((desc->ret_type & PL_ARRAY) && Z_TYPE_P(phpret) != IS_ARRAY)
-		ereport(ERROR,
-				(errcode(ERRCODE_DATATYPE_MISMATCH),
-				 errmsg("function declared to return array must return an array")));
-	if ((desc->ret_type & PL_TUPLE) && Z_TYPE_P(phpret) != IS_ARRAY)
-		ereport(ERROR,
-				(errcode(ERRCODE_DATATYPE_MISMATCH),
-				 errmsg("function declared to return tuple must return an array")));
+    phpret = plphp_call_php_func(desc, fcinfo TSRMLS_CC);
+	//elog(WARNING, "DEBUG handler: type=%d", Z_TYPE_P(phpret));
+    if (!phpret)
+        elog(ERROR, "error during execution of function %s", desc->proname);
 
-	/*
-	 * Disconnect from SPI manager and then create the return values datum (if
-	 * the input function does a palloc for it this must not be allocated in
-	 * the SPI memory context because SPI_finish would free it).
-	 */
-	if (SPI_finish() != SPI_OK_FINISH)
-		ereport(ERROR,
-				(errcode(ERRCODE_CONNECTION_DOES_NOT_EXIST),
-				 errmsg("could not disconnect from SPI manager")));
-	retval = (Datum) 0;
+    /* Basic datatype checks */
+    if ((desc->ret_type & PL_ARRAY) && Z_TYPE_P(phpret) != IS_ARRAY)
+    {
+        zval_ptr_dtor(phpret);
+        efree(phpret);
+        ereport(ERROR,
+                (errcode(ERRCODE_DATATYPE_MISMATCH),
+                 errmsg("function declared to return array must return an array")));
+    }
+    if ((desc->ret_type & PL_TUPLE) && Z_TYPE_P(phpret) != IS_ARRAY)
+    {
+        zval_ptr_dtor(phpret);
+        efree(phpret);
+        ereport(ERROR,
+                (errcode(ERRCODE_DATATYPE_MISMATCH),
+                 errmsg("function declared to return tuple must return an array")));
+    }
 
-	if (desc->ret_type & PL_PSEUDO)
-	{
-		HeapTuple	retTypeTup;
-		Form_pg_type retTypeStruct;
+    retval = (Datum) 0;
 
-		retTypeTup = SearchSysCache(TYPEOID,
-									ObjectIdGetDatum(get_fn_expr_rettype(fcinfo->flinfo)),
-									0, 0, 0);
-		retTypeStruct = (Form_pg_type) GETSTRUCT(retTypeTup);
-		perm_fmgr_info(retTypeStruct->typinput, &(desc->result_in_func));
-		desc->result_typioparam = retTypeStruct->typelem;
-		ReleaseSysCache(retTypeTup);
-	}
+    if (desc->ret_type & PL_PSEUDO)
+    {
+        HeapTuple    retTypeTup;
+        Form_pg_type retTypeStruct;
 
-	if (phpret)
-	{
-		switch (Z_TYPE_P(phpret))
-		{
-			case IS_NULL:
-				fcinfo->isnull = true;
-				break;
-				// PHP 8
-			    // case IS_BOOL:
-				// PHP 8
-			case IS_FALSE:
-			case IS_TRUE:
-			case IS_DOUBLE:
-			case IS_LONG:
-			case IS_STRING:
-				retvalbuffer = plphp_zval_get_cstring(phpret, false, false);
-				retval = CStringGetDatum(retvalbuffer);
-				break;
-			case IS_ARRAY:
-				if (desc->ret_type & PL_ARRAY)
-				{
-					retvalbuffer = plphp_convert_to_pg_array(phpret);
-					retval = CStringGetDatum(retvalbuffer);
-				}
-				else if (desc->ret_type & PL_TUPLE)
-				{
-					TupleDesc	td;
-					HeapTuple	tup;
+        retTypeTup = SearchSysCache(TYPEOID,
+                                    ObjectIdGetDatum(get_fn_expr_rettype(fcinfo->flinfo)),
+                                    0, 0, 0);
+        retTypeStruct = (Form_pg_type) GETSTRUCT(retTypeTup);
+        perm_fmgr_info(retTypeStruct->typinput, &(desc->result_in_func));
+        desc->result_typioparam = retTypeStruct->typelem;
+        ReleaseSysCache(retTypeTup);
+    }
 
-					if (desc->ret_type & PL_PSEUDO)
-						td = plphp_get_function_tupdesc(desc->ret_oid,
-														fcinfo->resultinfo);
-					else
-						td = lookup_rowtype_tupdesc(desc->ret_oid, (int32) -1);
+	// elog(WARNING, "DEBUG before switch: phpret=%p type=%d", (void*)phpret, Z_TYPE_P(phpret));
 
-					if (!td)
-						elog(ERROR, "no TupleDesc info available");
+    /* Step 1: extract retvalbuffer from phpret while phpret is still alive */
+    if (phpret)
+    {
+		zval *tmp = phpret;
+		int   typ = Z_TYPE_P(tmp);
+		// elog(WARNING, "before fprint ...");
+		// elog(WARNING, "DEBUG switch entry: typ=%d ptr=%p\n", typ, (void*)tmp);
+        
+		switch (typ)
+		//switch (Z_TYPE_P(phpret))
+        {
+            case IS_NULL:
+				// elog(WARNING, "DEBUG IS_NULL");
+                fcinfo->isnull = true;
+                break;
+            case IS_FALSE:
+            case IS_TRUE:
+            case IS_DOUBLE:
+            case IS_LONG:
+            case IS_STRING:
+				 //elog(WARNING, "DEBUG calling get_cstring");
+			     retvalbuffer = plphp_zval_get_cstring(phpret, false, false);
+				 //elog(WARNING, "DEBUG after get_cstring: retvalbuffer='%s' ptr=%p",
+			     //    retvalbuffer ? retvalbuffer : "(null)", (void*)retvalbuffer);
+		         retvalbuffer = pstrdup(retvalbuffer);
+				 //elog(WARNING, "DEBUG after pstrdup: retvalbuffer='%s' ptr=%p",
+			     //    retvalbuffer ? retvalbuffer : "(null)", (void*)retvalbuffer);
+		         retval = CStringGetDatum(retvalbuffer);
+				 break;
+                // retvalbuffer = plphp_zval_get_cstring(phpret, false, false);
+                // /* retvalbuffer is palloc'd — copy to TopMemoryContext so it
+                //  * survives SPI_finish and phpret cleanup */
+                // retvalbuffer = pstrdup(retvalbuffer);
+                //retval = CStringGetDatum(retvalbuffer);
+                //break;
+            case IS_ARRAY:
+                if (desc->ret_type & PL_ARRAY)
+                {
+                    retvalbuffer = plphp_convert_to_pg_array(phpret);
+                    retvalbuffer = pstrdup(retvalbuffer);
+                    retval = CStringGetDatum(retvalbuffer);
+                }
+                else if (desc->ret_type & PL_TUPLE)
+                {
+                    TupleDesc   td;
+                    HeapTuple   tup;
 
-					tup = plphp_htup_from_zval(phpret, td);
-					retval = HeapTupleGetDatum(tup);
-					ReleaseTupleDesc(td);
-				}
-				else
-					/* FIXME -- should return the thing as a string? */
-					elog(ERROR, "this plphp function cannot return arrays");
-				break;
-			default:
-				elog(WARNING,
-					 "plphp functions cannot return type %s",
-					 zend_get_type_by_const(Z_TYPE_P(phpret)));   // PHP 8
-				fcinfo->isnull = true;
-				break;
-		}
-	}
-	else
-	{
-		fcinfo->isnull = true;
-		retval = (Datum) 0;
-	}
+                    if (desc->ret_type & PL_PSEUDO)
+                        td = plphp_get_function_tupdesc(desc->ret_oid,
+                                                        fcinfo->resultinfo);
+                    else
+                        td = lookup_rowtype_tupdesc(desc->ret_oid, (int32) -1);
 
-	if (!fcinfo->isnull && !(desc->ret_type & PL_TUPLE))
-	{
-		retval = FunctionCall3(&desc->result_in_func,
-							   PointerGetDatum(retvalbuffer),
-							   ObjectIdGetDatum(desc->result_typioparam),
-							   Int32GetDatum(-1));
-		pfree(retvalbuffer);
-	}
+                    if (!td)
+                        elog(ERROR, "no TupleDesc info available");
 
-	REPORT_PHP_MEMUSAGE("finished calling user function");
+                    tup = plphp_htup_from_zval(phpret, td);
+                    retval = HeapTupleGetDatum(tup);
+                    ReleaseTupleDesc(td);
+                }
+                else
+                    elog(ERROR, "this plphp function cannot return arrays");
+                break;
+            default:
+                elog(WARNING,
+                     "plphp functions cannot return type %s",
+                     zend_get_type_by_const(Z_TYPE_P(phpret)));
+                fcinfo->isnull = true;
+                break;
+        }
+    }
+    else
+    {
+        fcinfo->isnull = true;
+        retval = (Datum) 0;
+    }
 
-	return retval;
+
+    /*
+     * Step 2: convert retvalbuffer to Datum via the type input function.
+     * retvalbuffer was pstrdup'd above so it survives SPI_finish.
+     */
+    if (!fcinfo->isnull && !(desc->ret_type & PL_TUPLE))
+    {
+		//elog(WARNING, "DEBUG before FunctionCall3: retvalbuffer='%s' ptr=%p",
+		//     retvalbuffer ? retvalbuffer : "(null)", (void*)retvalbuffer);
+		elog(WARNING, "DEBUG InputFunctionCall: retvalbuffer='%s' typioparam=%u isnull=%d ret_type=%d",
+         retvalbuffer ? retvalbuffer : "(null)",
+         desc->result_typioparam,
+         fcinfo->isnull,
+         desc->ret_type);
+		 elog(WARNING, "DEBUG result_in_func: fn_oid=%u", desc->result_in_func.fn_oid);
+        //retval = FunctionCall3(&desc->result_in_func,
+        //                       PointerGetDatum(retvalbuffer),
+        //                       ObjectIdGetDatum(desc->result_typioparam),
+        //                       Int32GetDatum(-1));
+		retval = InputFunctionCall(&desc->result_in_func,
+                               retvalbuffer,
+                               desc->result_typioparam,
+                               -1);
+        pfree(retvalbuffer);
+    }
+
+    /*
+     * Step 3: destroy phpret BEFORE SPI_finish so that any SPI resource
+     * destructors it holds can still call SPI functions.
+     */
+    zval_ptr_dtor(phpret);
+    efree(phpret);
+
+    /*
+     * Step 4: disconnect from SPI now that PHP resources are cleaned up.
+     */
+    if (SPI_finish() != SPI_OK_FINISH)
+        ereport(ERROR,
+                (errcode(ERRCODE_CONNECTION_DOES_NOT_EXIST),
+                 errmsg("could not disconnect from SPI manager")));
+
+    return retval;
 }
 
 /*
@@ -1267,6 +1315,7 @@ plphp_compile_function(Oid fnoid, bool is_trigger TSRMLS_DC)
 	int			i;
 	char	   *pointer = NULL;
 	zend_string 	*key;
+	zend_string 	*pkey;
 
 	/*
 	 * We'll need the pg_proc tuple in any case... 
@@ -1351,7 +1400,7 @@ plphp_compile_function(Oid fnoid, bool is_trigger TSRMLS_DC)
 		/*
 		 * Allocate a new procedure description block
 		 */
-		// PHP 8: use emalloc
+		// PHP 8: use emalloc  
 		prodesc = (plphp_proc_desc *) emalloc(sizeof(plphp_proc_desc));
 		if (!prodesc)
 			ereport(ERROR,
@@ -1478,6 +1527,10 @@ plphp_compile_function(Oid fnoid, bool is_trigger TSRMLS_DC)
 
 			perm_fmgr_info(typinput, &(prodesc->result_in_func));
 			prodesc->result_typioparam = typioparam;
+			elog(WARNING, "DEBUG compile: prodesc=%p fn_oid=%u typioparam=%u",
+   				  (void*)prodesc,
+			     prodesc->result_in_func.fn_oid,
+			     prodesc->result_typioparam);
 
 			/* Deal with named arguments, OUT, IN/OUT and TABLE arguments */
 
@@ -1671,10 +1724,14 @@ plphp_compile_function(Oid fnoid, bool is_trigger TSRMLS_DC)
 		if (zend_eval_string(complete_proc_source, NULL,
 							 "plphp function source" TSRMLS_CC) == FAILURE)
 		{
-			/* the next compilation will blow it up */
+			/* Invalidate cache entry so next call recompiles it */
 			prodesc->fn_xmin = InvalidTransactionId;
-			elog(ERROR, "unable to compile function \"%s\"",
-					   prodesc->proname);
+			/* Also remove from proc array so we don't return a stale desc */
+			pkey = zend_string_init(internal_proname,
+                                           strlen(internal_proname), 0);
+	        zend_hash_del(Z_ARRVAL(plphp_proc_array), pkey);
+            zend_string_release(pkey);
+			elog(ERROR, "unable to compile function \"%s\"", prodesc->proname);
 		}
 
 		if (aliases)
@@ -1698,12 +1755,13 @@ plphp_compile_function(Oid fnoid, bool is_trigger TSRMLS_DC)
 static zval *
 plphp_func_build_args(plphp_proc_desc *desc, FunctionCallInfo fcinfo TSRMLS_DC)
 {
-	zval		retval_val;
-	zval	   *retval = &retval_val;
+	zval	   *retval = emalloc(sizeof(zval));
 	int			i,j;
 
 	// PHP 8 MAKE_STD_ZVAL(retval);
+	ZVAL_UNDEF(retval);
 	array_init(retval);
+
 
 	/* 
 	 * The first var iterates over every argument, the second one - over the 
@@ -1838,132 +1896,55 @@ plphp_func_build_args(plphp_proc_desc *desc, FunctionCallInfo fcinfo TSRMLS_DC)
 	return retval;
 }
 
-/*
- * plphp_call_php_func
- * 		Build the function argument array and call the PHP function.
- *
- * We use a private PHP symbol table, so that we can easily destroy everything
- * used during the execution of the function.  We use it to collect the
- * arguments' zvals as well.  We exclude the return value, because it will be
- * used by the caller -- it must be freed there!
- */
+
 static zval *
 plphp_call_php_func(plphp_proc_desc *desc, FunctionCallInfo fcinfo TSRMLS_DC)
 {
-	// PHP 8 zval	   *retval;
-	// zval 	retval;
-	// PHP8: 'return' needs malloc:
-    zval *retval = emalloc(sizeof(zval));
-	zval	   *args;
-	// PHP 8
-	// zval	  **params[2];
-	zval	    params[2];
-	char		call[64];
-	// PHP 8 HashTable  *orig_symbol_table;
-	HashTable  *symbol_table;
-	zend_string *key;
-	zval		argc_val;
-	zval	   *argc = &argc_val;
-	zval       funcname_val;
-	zval	   *funcname = &funcname_val;
+    zval    retval_val;
+    zval   *retval;
+    zval   *args;
+    zval    params[2];
+    zval    argc_val;
+    zval    funcname_val;
+    char    call[64];
 
-	REPORT_PHP_MEMUSAGE("going to build function args");
+    ZVAL_UNDEF(&retval_val);
 
-	ALLOC_HASHTABLE(symbol_table);
-	zend_hash_init(symbol_table, 0, NULL, ZVAL_PTR_DTOR, 0);
+    /* Build args - heap allocated */
+    args = plphp_func_build_args(desc, fcinfo TSRMLS_CC);
 
-	/*
-	 * Build the function arguments.  Save a pointer to each new zval in our
-	 * private symbol table, so that we can clean up easily later.
-	 */
-	args = plphp_func_build_args(desc, fcinfo TSRMLS_CC);
-	// PHP 8
-	key = zend_string_init("args", strlen("args"), 0);
-    zend_hash_update(symbol_table, key, args);
-    zend_string_release(key);
-	// zend_hash_update(symbol_table, "args", strlen("args") + 1,
-	//				 (void *) &args, sizeof(zval *), NULL);
+    /* params[0] = args array, params[1] = argc long */
+    /* Use ZVAL_COPY to give PHP its own reference-counted copy */
+    ZVAL_COPY(&params[0], args);
+    ZVAL_LONG(&argc_val, desc->n_total_args);
+    ZVAL_COPY(&params[1], &argc_val);
 
-	REPORT_PHP_MEMUSAGE("args built. Now the rest ...");
+    /* Build function name */
+    sprintf(call, "plphp_proc_%u", fcinfo->flinfo->fn_oid);
+    ZVAL_STRING(&funcname_val, call);
 
-	// PHP 8
-	array_init(argc);
-	// MAKE_STD_ZVAL(argc);
-	ZVAL_LONG(argc, desc->n_total_args);
-	// PHP 8
-	key = zend_string_init("argc", strlen("argc"), 0);
-    zend_hash_update(symbol_table, key, argc);
-    zend_string_release(key);
-	// zend_hash_update(symbol_table, "argc", strlen("argc") + 1,
-	//				 (void *) &argc, sizeof(zval *), NULL);
+    /* Call the PHP function */
+    if (call_user_function(NULL, NULL, &funcname_val, &retval_val,
+                           2, params) == FAILURE)
+        elog(ERROR, "could not call function \"%s\"", call);
 
-	// PHP 8
-	// params[0] = &args;
-	// params[1] = &argc;
-	ZVAL_COPY(&params[0], args);   // args is zval*, so no & needed
-    ZVAL_COPY(&params[1], argc);   // argc is zval*, so no & needed
+	//elog(WARNING, "DEBUG: type=%d", Z_TYPE_P(&retval_val));
 
-	/* Build the internal function name, and save for later cleaning */
-	sprintf(call, "plphp_proc_%u", fcinfo->flinfo->fn_oid);
-	// PHP 8
-	array_init(funcname);
-	// MAKE_STD_ZVAL(funcname);
-	ZVAL_STRING(funcname, call);
-	// PHP 8
-	// ZVAL_STRING(funcname, call, 1);
-	// PHP 8
-	key = zend_string_init("funcname", strlen("funcname"), 0);
-    zend_hash_update(symbol_table, key, funcname);
-    zend_string_release(key);
-	// zend_hash_update(symbol_table, "funcname", strlen("funcname") + 1,
-	//				 (void *) &funcname, sizeof(zval *), NULL);
-
-	REPORT_PHP_MEMUSAGE("going to call the function");
-
-
-	/* PHP 8: call_user_function no longer takes symbol_table or TSRMLS */
-	if (call_user_function(CG(function_table), NULL, funcname, retval,
-	                       2, params) == FAILURE)
-	    elog(ERROR, "could not call function \"%s\"", call);
-
-	// PHP 8
-	zval_ptr_dtor(&params[0]);
+    /* Cleanup */
+    zval_ptr_dtor(&params[0]);
     zval_ptr_dtor(&params[1]);
+    zval_ptr_dtor(&funcname_val);
 
-	REPORT_PHP_MEMUSAGE("going to free some vars");
+    /* Cleanup args - we own it */
+    zval_ptr_dtor(args);
+    efree(args);
 
-	/* PHP 8: no symbol table save/restore needed */
-	zend_hash_clean(symbol_table);
+    /* Copy result to heap for caller */
+    retval = emalloc(sizeof(zval));
+    ZVAL_COPY(retval, &retval_val);
+    zval_ptr_dtor(&retval_val);
 
-	REPORT_PHP_MEMUSAGE("function call done");
-
-
-	// ----------------------- PHP 8 -------------------------------------------------
-	// comments
-	// PHP 8's call_user_function manages its own scope internally.
-	// The no_separation flag, symbol_table argument, and TSRMLS_CC are all gone.
-	// -----------------------------------------------------------------------------
-	// orig_symbol_table = EG(active_symbol_table);
-	// EG(active_symbol_table) = symbol_table;
-
-	// saved_symbol_table = EG(active_symbol_table);
-
-	// /* XXX: why no_separation param is 1 is this call ? */
-	// if (call_user_function_ex(CG(function_table), NULL, funcname, &retval,
-	//						  2, params, 1, symbol_table TSRMLS_CC) == FAILURE)
-	//	elog(ERROR, "could not call function \"%s\"", call);
-
-	// REPORT_PHP_MEMUSAGE("going to free some vars");
-
-	// saved_symbol_table = NULL;
-
-	/* Return to the original symbol table, and clean our private one */
-	// EG(active_symbol_table) = orig_symbol_table;
-	// zend_hash_clean(symbol_table);
-
-	//REPORT_PHP_MEMUSAGE("function call done");
-
-	return retval;
+    return retval;
 }
 
 /*
@@ -1978,7 +1959,7 @@ static zval *
 plphp_call_php_trig(plphp_proc_desc *desc, FunctionCallInfo fcinfo,
 					zval *trigdata TSRMLS_DC)
 {
-	zval	   *retval = NULL;
+	zval *retval = emalloc(sizeof(zval));
 	zval		funcname_val;
 	zval	   *funcname = &funcname_val;
 	char		call[64];
@@ -1986,6 +1967,7 @@ plphp_call_php_trig(plphp_proc_desc *desc, FunctionCallInfo fcinfo,
 	// zval	  **params[1];
 	zval	   params[1];
 
+	ZVAL_UNDEF(retval);
 	// PHP 8
 	// params[0] = &trigdata;
 	params[0] = *trigdata;
@@ -1993,7 +1975,8 @@ plphp_call_php_trig(plphp_proc_desc *desc, FunctionCallInfo fcinfo,
 	/* Build the internal function name, and save for later cleaning */
 	sprintf(call, "plphp_proc_%u_trigger", fcinfo->flinfo->fn_oid);
 	// PHP 8
-	array_init(funcname);
+	// funcname must be a string
+	// array_init(funcname);
 	// MAKE_STD_ZVAL(funcname);
 	
 	// PHP 8
@@ -2012,7 +1995,7 @@ plphp_call_php_trig(plphp_proc_desc *desc, FunctionCallInfo fcinfo,
 	// if (call_user_function_ex(CG(function_table), NULL, funcname, &retval,
 	//						  1, params, 1, NULL TSRMLS_CC) == FAILURE)
 	if (call_user_function(CG(function_table), NULL, funcname, retval,
-							  2, params) == FAILURE)
+							  1, params) == FAILURE)
 		elog(ERROR, "could not call function \"%s\"", call);
 
 	// PHP 8
